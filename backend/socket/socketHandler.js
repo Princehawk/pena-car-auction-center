@@ -1,11 +1,13 @@
 import { Server } from 'socket.io'
+import dotenv from 'dotenv'
+dotenv.config()
 
 export let io = null
 
 export const registerSocketHandlers = server => {
   io = new Server(server, {
     cors: {
-      origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+      origin: process.env.ALLOWED_ORIGINS?.split(',').map(s => s.trim()) || '*',
       methods: ['GET', 'POST'],
       credentials: true
     }
