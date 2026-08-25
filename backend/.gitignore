@@ -1,0 +1,10 @@
+.env
+
+sql
+
+node_modules
+
+logs
+*.log
+
+tmp-getcars-test.mjs
