@@ -9,6 +9,7 @@ import rateLimit from 'express-rate-limit'
 import { registerSocketHandlers } from './socket/socketHandler.js'
 
 const app = express()
+app.set('trust proxy', 1)
 const server = http.createServer(app)
 dotenv.config()
 // Basic security headers
@@ -41,7 +42,7 @@ registerSocketHandlers(server)
 const PORT = process.env.PORT
 
 const startServer = () => {
-  server.listen(PORT, () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on port ${PORT}`)
   })
 }
