@@ -7,7 +7,7 @@ export let io = null
 export const registerSocketHandlers = server => {
   io = new Server(server, {
     cors: {
-      origin: process.env.ALLOWED_ORIGINS?.split(',').map(s => s.trim()) || '*',
+      origin: process.env.ALLOWED_ORIGINS,
       methods: ['GET', 'POST'],
       credentials: true
     }
