@@ -8,11 +8,18 @@ import AuthModal from './components/AuthModal.jsx'
 import { useAuth } from './context/AuthContext.jsx'
 import { ToastContainer, toast } from 'react-toastify'
 
-const API_URL = import.meta.env.VITE_API_URL || window.location.origin
-const SOCKET_URL =
-  import.meta.env.VITE_SOCKET_URL ||
-  import.meta.env.VITE_API_URL ||
-  window.location.origin
+const API_URL = import.meta.env.VITE_API_URL
+
+if (!API_URL) {
+  console.error('❌ VITE_API_URL is not defined in the environment variables.')
+}
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL
+if (!SOCKET_URL) {
+  console.error(
+    '❌ VITE_SOCKET_URL is not defined in the environment variables.'
+  )
+}
+
 function CarDetails () {
   const { id } = useParams()
   const navigate = useNavigate()
