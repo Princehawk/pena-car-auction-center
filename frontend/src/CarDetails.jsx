@@ -20,6 +20,9 @@ if (!SOCKET_URL) {
   )
 }
 
+console.log('API_URL:', API_URL)
+console.log('SOCKET_URL:', SOCKET_URL)
+
 function CarDetails () {
   const { id } = useParams()
   const navigate = useNavigate()
