@@ -1,8 +1,13 @@
-import { useEffect, useState } from 'react'
+import { cloneElement, useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext.jsx'
+import { supabase } from './lib/supabase'
+import { io as socketClient } from 'socket.io-client'
 import Navbar from './Navbar.jsx'
 import './App.css'
+
+const API_URL = import.meta.env.VITE_API_URL
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL
 
 const navItems = [
   { key: 'stats', label: 'Stats', icon: 'fa-chart-line', to: '/admin' },
@@ -15,11 +20,41 @@ const navItems = [
 export default function AdminLayout ({ children }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const { signOut, isAdmin } = useAuth()
+  const { signOut, isAdmin, session } = useAuth()
   const [collapsed, setCollapsed] = useState(
     () => typeof window !== 'undefined' && window.innerWidth < 921
   )
   const [hovered, setHovered] = useState(false)
+  const [unreadBidCount, setUnreadBidCount] = useState(0)
+
+  useEffect(() => {
+    let active = true
+    const socket = socketClient(SOCKET_URL, {
+      auth: { token: session?.access_token }
+    })
+
+    const loadUnreadCount = async () => {
+      const { data } = await supabase.auth.getSession()
+      if (!data.session) return
+      const response = await fetch(`${API_URL}/admin/bids`, {
+        headers: { Authorization: `Bearer ${data.session.access_token}` }
+      })
+      if (!response.ok || !active) return
+      const bids = await response.json()
+      setUnreadBidCount(bids.filter(bid => !Number(bid.is_read)).length)
+    }
+
+    loadUnreadCount()
+    socket.on('newBid', () => setUnreadBidCount(count => count + 1))
+    socket.on('bidRead', () => {
+      setUnreadBidCount(count => Math.max(0, count - 1))
+    })
+
+    return () => {
+      active = false
+      socket.disconnect()
+    }
+  }, [session?.access_token])
 
   useEffect(() => {
     const handleResize = () => {
@@ -105,6 +140,14 @@ export default function AdminLayout ({ children }) {
                   <i className={`fa ${item.icon}`} />
                 </span>
                 <span className='sidebar-label'>{item.label}</span>
+                {item.key === 'bids' && unreadBidCount > 0 && (
+                  <span
+                    className='unread-count'
+                    aria-label={`${unreadBidCount} unread bids`}
+                  >
+                    {unreadBidCount}
+                  </span>
+                )}
               </Link>
             ))}
           </nav>
@@ -114,7 +157,7 @@ export default function AdminLayout ({ children }) {
           <div className='admin-toolbar'>
             <div className='admin-toolbar-spacer' />
           </div>
-          {children}
+          {cloneElement(children, { unreadBidCount, setUnreadBidCount })}
         </main>
       </div>
     </div>

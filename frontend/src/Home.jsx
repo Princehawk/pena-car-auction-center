@@ -6,21 +6,25 @@ import ImagePreview from './ImagePreview.jsx'
 import AuthModal from './components/AuthModal.jsx'
 import { useAuth } from './context/AuthContext.jsx'
 import { ToastContainer, toast } from 'react-toastify'
+import { io as socketClient } from 'socket.io-client'
 
-const API_URL = import.meta.env.VITE_API_URL || window.location.origin
+const API_URL = import.meta.env.VITE_API_URL
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL
 
-const formatCountdown = expiryAt => {
+const formatCountdown = (expiryAt, now) => {
   if (!expiryAt) return ''
-  const difference = new Date(expiryAt) - new Date()
+  const difference = new Date(expiryAt) - now
   if (difference <= 0) return 'Expired'
   const days = Math.floor(difference / (1000 * 60 * 60 * 24))
   const hours = Math.floor((difference / (1000 * 60 * 60)) % 24)
   const minutes = Math.floor((difference / (1000 * 60)) % 60)
-  return `${days}d ${hours}h ${minutes}m left`
+  const seconds = Math.floor((difference / 1000) % 60)
+  return `${days}d ${hours}h ${minutes}m ${seconds}s left`
 }
 
 function Home () {
   const [cars, setCars] = useState([])
+  const [brands, setBrands] = useState([])
   const [filters, setFilters] = useState({
     search: '',
     brand: '',
@@ -36,6 +40,7 @@ function Home () {
   const { session, isAuthenticated, isAdmin, signOut } = useAuth()
   const [previewIndex, setPreviewIndex] = useState(0)
   const [previewVisible, setPreviewVisible] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
 
   const openPreview = (images, index = 0) => {
     setPreviewImages(images)
@@ -76,6 +81,54 @@ function Home () {
     filters.sort
   ])
 
+  useEffect(() => {
+    fetch(`${API_URL}/brands`)
+      .then(response => response.json())
+      .then(data => setBrands(Array.isArray(data) ? data : []))
+      .catch(() => setBrands([]))
+  }, [])
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    const socket = socketClient(SOCKET_URL)
+    const refreshCars = () => {
+      fetchCars()
+    }
+
+    socket.on('carCreated', refreshCars)
+    socket.on('carVisibilityChanged', refreshCars)
+    socket.on('carUpdated', refreshCars)
+    socket.on('carRemoved', refreshCars)
+    socket.on('newBid', payload => {
+      setCars(current =>
+        current.map(car =>
+          String(car.id) === String(payload?.car_id)
+            ? {
+                ...car,
+                current_highest_bid: Math.max(
+                  Number(car.current_highest_bid || 0),
+                  Number(payload.bid_amount || 0)
+                )
+              }
+            : car
+        )
+      )
+    })
+    return () => socket.disconnect()
+  }, [
+    filters.search,
+    filters.brand,
+    filters.year,
+    filters.fuel_type,
+    filters.transmission,
+    filters.status,
+    filters.sort
+  ])
+
   const navigate = useNavigate()
   const statusText = useMemo(
     () => (isAuthenticated ? 'Signed in' : 'Guest'),
@@ -88,6 +141,9 @@ function Home () {
         brand='Pena Auctions'
         links={[
           { label: 'Browse Cars', to: '/' },
+          ...(isAuthenticated
+            ? [{ label: 'My Bid History', to: '/my-bids' }]
+            : []),
           ...(isAdmin ? [{ label: 'Admin', to: '/admin' }] : [])
         ]}
         ctaLabel={isAuthenticated ? 'Logout' : 'Login'}
@@ -116,8 +172,11 @@ function Home () {
               }
             >
               <option value=''>All brands</option>
-              <option value='Toyota'>Toyota</option>
-              <option value='Honda'>Honda</option>
+              {brands.map(brand => (
+                <option key={brand} value={brand}>
+                  {brand}
+                </option>
+              ))}
             </select>
             <select
               value={filters.sort}
@@ -159,11 +218,22 @@ function Home () {
                   <div className='small'>
                     {car.brand} • {car.model} • {car.year}
                   </div>
-                  <div className='price'>KSh {car.price.toLocaleString()}</div>
+                  <div className='card-prices'>
+                    <span className='starting-price'>
+                      Starting price: KSh{' '}
+                      {Number(car.price || 0).toLocaleString()}
+                    </span>
+                    <strong className='current-bid-price'>
+                      Current highest bid: KSh{' '}
+                      {Number(
+                        car.current_highest_bid || car.price || 0
+                      ).toLocaleString()}
+                    </strong>
+                  </div>
                   {car.expiry_at ? (
                     <div className='small'>
                       <i className='fa fa-clock' />{' '}
-                      {formatCountdown(car.expiry_at)}
+                      {formatCountdown(car.expiry_at, now)}
                     </div>
                   ) : null}
                   <a

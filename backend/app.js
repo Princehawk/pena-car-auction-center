@@ -7,6 +7,7 @@ import bidRoutes from './routes/bidRoutes.js'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { registerSocketHandlers } from './socket/socketHandler.js'
+import { processExpiredAuctions } from './services/bidService.js'
 
 const app = express()
 app.set('trust proxy', 1)
@@ -38,6 +39,11 @@ app.use(carRoutes)
 app.use(bidRoutes)
 
 registerSocketHandlers(server)
+setInterval(() => {
+  processExpiredAuctions().catch(error => {
+    console.error('Expired auction processing failed:', error.message)
+  })
+}, 60 * 1000)
 
 const PORT = process.env.PORT
 

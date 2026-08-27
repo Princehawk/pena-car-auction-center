@@ -20,9 +20,6 @@ if (!SOCKET_URL) {
   )
 }
 
-console.log('API_URL:', API_URL)
-console.log('SOCKET_URL:', SOCKET_URL)
-
 function CarDetails () {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -30,7 +27,7 @@ function CarDetails () {
   const [bidAmount, setBidAmount] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
-  const { session, isAuthenticated, isAdmin, signOut } = useAuth()
+  const { session, dbUser, isAuthenticated, isAdmin, signOut } = useAuth()
   const [previewImages, setPreviewImages] = useState([])
   const [previewIndex, setPreviewIndex] = useState(0)
   const [previewVisible, setPreviewVisible] = useState(false)
@@ -55,7 +52,9 @@ function CarDetails () {
   }, [id])
 
   useEffect(() => {
-    const socket = socketClient(SOCKET_URL)
+    const socket = socketClient(SOCKET_URL, {
+      auth: { token: session?.access_token }
+    })
     socket.on('connect', () => {
       console.log('✅ CarDetails socket connected:', socket.id, SOCKET_URL)
       if (id) socket.emit('joinCar', id)
@@ -94,7 +93,7 @@ function CarDetails () {
     })
 
     return () => socket.disconnect()
-  }, [id])
+  }, [id, session?.access_token])
 
   useEffect(() => {
     if (!session?.access_token) {
@@ -209,10 +208,26 @@ function CarDetails () {
     setShowModal(true)
   }
 
-  const highestBid = useMemo(() => {
-    if (!car?.bids?.length) return car?.price
-    return Math.max(...car.bids.map(bid => bid.bid_amount))
+  const highestBidRecord = useMemo(() => {
+    if (!car?.bids?.length) return null
+    return [...car.bids]
+      .filter(bid => !['Outbid', 'Won'].includes(bid.status))
+      .sort(
+        (first, second) =>
+          Number(second.bid_amount) - Number(first.bid_amount) ||
+          new Date(second.created_at) - new Date(first.created_at)
+      )[0]
   }, [car])
+
+  const highestBid = highestBidRecord?.bid_amount || car?.price
+  const isCurrentHighestBidder = Boolean(
+    session &&
+      !isAdmin &&
+      dbUser?.id &&
+      highestBidRecord?.user_id &&
+      Number(highestBidRecord.user_id) === Number(dbUser.id) &&
+      car.status === 'Available'
+  )
 
   const isBidLocked = !session || !biddingAllowed
 
@@ -347,8 +362,14 @@ function CarDetails () {
                 <span className='small muted'>Current highest</span>
               </div>
               <div className='price large'>
-                KSh {highestBid?.toLocaleString() ?? '0'}
+                KSh {Number(highestBid || 0).toLocaleString()}
               </div>
+              {isCurrentHighestBidder && (
+                <p className='current-highest-message'>
+                  <i className='fa fa-check-circle' aria-hidden='true' /> You
+                  are currently the highest bidder.
+                </p>
+              )}
               {isBidLocked ? (
                 <div className='locked-bid-block'>
                   <p className='small status-text'>

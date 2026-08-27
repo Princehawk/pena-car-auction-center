@@ -48,19 +48,29 @@ export default function Users () {
   useEffect(() => {
     fetchUsers()
 
-    const socket = socketClient(SOCKET_URL)
-    socket.on('connect', () => {
-      console.log('✅ Users socket connected:', socket.id, SOCKET_URL)
+    let socket
+    let active = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return
+      socket = socketClient(SOCKET_URL, {
+        auth: { token: data.session?.access_token }
+      })
+      socket.on('connect', () => {
+        console.log('✅ Users socket connected:', socket.id, SOCKET_URL)
+      })
+      socket.on('connect_error', error => {
+        console.error('❌ Users socket connection error:', error)
+      })
+      socket.on('disconnect', reason => {
+        console.log('🔌 Users socket disconnected:', reason)
+      })
+      socket.on('biddingAccessChanged', () => fetchUsers())
     })
-    socket.on('connect_error', error => {
-      console.error('❌ Users socket connection error:', error)
-    })
-    socket.on('disconnect', reason => {
-      console.log('🔌 Users socket disconnected:', reason)
-    })
-    socket.on('biddingAccessChanged', () => fetchUsers())
 
-    return () => socket.disconnect()
+    return () => {
+      active = false
+      socket?.disconnect()
+    }
   }, [search, role, sort])
 
   const handleAllowBidding = async userId => {

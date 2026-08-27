@@ -96,6 +96,16 @@ const ensureImagePublicIdColumn = async connection => {
   }
 }
 
+const ensureBrandsTable = async connection => {
+  await connection.execute(
+    `CREATE TABLE IF NOT EXISTS brands (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(100) NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`
+  )
+}
+
 const retractExpiredCars = async connection => {
   await connection.execute(
     "UPDATE cars SET status = 'Retreated' WHERE status = 'Available' AND expiry_at IS NOT NULL AND expiry_at <= NOW()"
@@ -163,11 +173,20 @@ const enrichCar = async (connection, row) => {
   const [profileRows] = await connection.execute(
     'SELECT name, phone, email, whatsapp, location FROM admin_profile ORDER BY id LIMIT 1'
   )
+  const [highestBidRows] = await connection.execute(
+    `SELECT MAX(bid_amount) AS current_highest_bid
+     FROM bids
+     WHERE car_id = ?
+       AND (is_deleted IS NULL OR is_deleted = 0)
+       AND status NOT IN ('Outbid', 'Won')`,
+    [row.id]
+  )
 
   return {
     ...row,
     images: imagesRows.map(image => image.image_url),
-    admin_profile: profileRows[0] || getDefaultAdminProfile()
+    admin_profile: profileRows[0] || getDefaultAdminProfile(),
+    current_highest_bid: highestBidRows[0]?.current_highest_bid || null
   }
 }
 
@@ -303,14 +322,14 @@ export const getCarById = async id => {
       await retractExpiredCars(connection)
 
       const [rows] = await connection.execute(
-        'SELECT * FROM cars WHERE id = ?',
+        'SELECT * FROM cars WHERE id = ? AND (is_deleted IS NULL OR is_deleted = 0)',
         [id]
       )
       if (!rows.length) return null
 
       const car = await enrichCar(connection, rows[0])
       const [bidRows] = await connection.execute(
-        'SELECT * FROM bids WHERE car_id = ? ORDER BY created_at DESC',
+        'SELECT * FROM bids WHERE car_id = ? AND (is_deleted IS NULL OR is_deleted = 0) ORDER BY created_at DESC',
         [id]
       )
 
@@ -338,6 +357,7 @@ export const createCar = async payload => {
 
       await ensureExpiryColumn(connection)
       await ensureImagePublicIdColumn(connection)
+      await ensureBrandsTable(connection)
       await retractExpiredCars(connection)
 
       // Validate expiry when creating a car with status 'Available'
@@ -378,6 +398,10 @@ export const createCar = async payload => {
         )
 
         const carId = result.insertId
+        await connection.execute(
+          'INSERT IGNORE INTO brands (name) VALUES (?)',
+          [String(payload.brand).trim()]
+        )
 
         if (uploadedImages.length) {
           for (const [index, image] of uploadedImages.entries()) {
@@ -518,16 +542,23 @@ export const deleteCar = async id => {
   try {
     const connection = await db.getConnection()
     try {
+      await connection.beginTransaction()
       await connection.execute(
         "UPDATE cars SET is_deleted = 1, status = 'Retreated' WHERE id = ?",
+        [id]
+      )
+      await connection.execute(
+        'UPDATE bids SET is_deleted = 1 WHERE car_id = ?',
         [id]
       )
       const [rows] = await connection.execute(
         'SELECT id, status, is_deleted FROM cars WHERE id = ?',
         [id]
       )
+      await connection.commit()
       return Boolean(rows[0] && Number(rows[0].is_deleted) === 1)
     } catch (error) {
+      await connection.rollback()
       console.error('deleteCar failed:', error.message)
       throw error
     } finally {
@@ -830,10 +861,10 @@ export const getAdminStats = async () => {
     const connection = await db.getConnection()
     try {
       const [[carCount]] = await connection.execute(
-        'SELECT COUNT(*) as totalCars FROM cars'
+        'SELECT COUNT(*) as totalCars FROM cars WHERE is_deleted IS NULL OR is_deleted = 0'
       )
       const [[bidCount]] = await connection.execute(
-        'SELECT COUNT(*) as totalBids FROM bids'
+        'SELECT COUNT(*) as totalBids FROM bids WHERE is_deleted IS NULL OR is_deleted = 0'
       )
       const [[userCount]] = await connection.execute(
         'SELECT COUNT(*) as totalUsers FROM users'
@@ -850,5 +881,33 @@ export const getAdminStats = async () => {
   } catch (error) {
     console.error('getAdminStats failed:', error.message)
     throw error
+  }
+}
+
+export const getBrands = async () => {
+  const connection = await db.getConnection()
+  try {
+    await ensureBrandsTable(connection)
+    await connection.execute(
+      `DELETE brands FROM brands
+       LEFT JOIN (
+         SELECT DISTINCT TRIM(brand) AS name FROM cars
+         WHERE brand IS NOT NULL AND TRIM(brand) <> ''
+           AND (is_deleted IS NULL OR is_deleted = 0)
+       ) AS active_brands ON active_brands.name = brands.name
+       WHERE active_brands.name IS NULL`
+    )
+    await connection.execute(
+      `INSERT IGNORE INTO brands (name)
+       SELECT DISTINCT TRIM(brand) FROM cars
+       WHERE brand IS NOT NULL AND TRIM(brand) <> ''
+         AND (is_deleted IS NULL OR is_deleted = 0)`
+    )
+    const [rows] = await connection.execute(
+      'SELECT name FROM brands ORDER BY name ASC'
+    )
+    return rows.map(row => row.name)
+  } finally {
+    connection.release()
   }
 }

@@ -11,6 +11,17 @@ const SOCKET_URL =
 const MAX_IMAGES = 15
 const MAX_IMAGE_SIZE_MB = 6
 
+const formatCountdown = (expiryAt, now) => {
+  if (!expiryAt) return ''
+  const difference = new Date(expiryAt) - now
+  if (difference <= 0) return 'Expired'
+  const days = Math.floor(difference / (1000 * 60 * 60 * 24))
+  const hours = Math.floor((difference / (1000 * 60 * 60)) % 24)
+  const minutes = Math.floor((difference / (1000 * 60)) % 60)
+  const seconds = Math.floor((difference / 1000) % 60)
+  return `${days}d ${hours}h ${minutes}m ${seconds}s left`
+}
+
 const formatBytes = bytes => {
   if (!bytes) return '0 MB'
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
@@ -50,6 +61,7 @@ export default function Vehicles () {
   const [submitting, setSubmitting] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [now, setNow] = useState(() => Date.now())
 
   const fetchCars = async () => {
     setLoading(true)
@@ -78,22 +90,52 @@ export default function Vehicles () {
   useEffect(() => {
     fetchCars()
 
-    const socket = socketClient(SOCKET_URL)
-    socket.on('connect', () => {
-      console.log('✅ Vehicles socket connected:', socket.id, SOCKET_URL)
+    let socket
+    let active = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return
+      socket = socketClient(SOCKET_URL, {
+        auth: { token: data.session?.access_token }
+      })
+      socket.on('connect', () => {
+        console.log('✅ Vehicles socket connected:', socket.id, SOCKET_URL)
+      })
+      socket.on('connect_error', error => {
+        console.error('❌ Vehicles socket connection error:', error)
+      })
+      socket.on('disconnect', reason => {
+        console.log('🔌 Vehicles socket disconnected:', reason)
+      })
+      socket.on('carVisibilityChanged', () => fetchCars())
+      socket.on('carUpdated', () => fetchCars())
+      socket.on('carRemoved', () => fetchCars())
+      socket.on('carCreated', () => fetchCars())
+      socket.on('newBid', payload => {
+        setCars(current =>
+          current.map(car =>
+            String(car.id) === String(payload?.car_id)
+              ? {
+                  ...car,
+                  current_highest_bid: Math.max(
+                    Number(car.current_highest_bid || 0),
+                    Number(payload.bid_amount || 0)
+                  )
+                }
+              : car
+          )
+        )
+      })
     })
-    socket.on('connect_error', error => {
-      console.error('❌ Vehicles socket connection error:', error)
-    })
-    socket.on('disconnect', reason => {
-      console.log('🔌 Vehicles socket disconnected:', reason)
-    })
-    socket.on('carVisibilityChanged', () => fetchCars())
-    socket.on('carUpdated', () => fetchCars())
-    socket.on('carRemoved', () => fetchCars())
-    socket.on('carCreated', () => fetchCars())
 
-    return () => socket.disconnect()
+    return () => {
+      active = false
+      socket?.disconnect()
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
   }, [])
 
   const compressImage = async file => {
@@ -410,9 +452,24 @@ export default function Vehicles () {
                   <div className='small'>
                     {car.brand} • {car.model} • {car.year}
                   </div>
-                  <div className='price'>
-                    KSh {Number(car.price || 0).toLocaleString()}
+                  <div className='card-prices'>
+                    <span className='starting-price'>
+                      Starting price: KSh{' '}
+                      {Number(car.price || 0).toLocaleString()}
+                    </span>
+                    <strong className='current-bid-price'>
+                      Current highest bid: KSh{' '}
+                      {Number(
+                        car.current_highest_bid || car.price || 0
+                      ).toLocaleString()}
+                    </strong>
                   </div>
+                  {car.expiry_at && (
+                    <div className='small'>
+                      <i className='fa fa-clock' />{' '}
+                      {formatCountdown(car.expiry_at, now)}
+                    </div>
+                  )}
                   <div className='vehicle-actions'>
                     <button
                       type='button'
@@ -515,8 +572,8 @@ export default function Vehicles () {
                   />
                 </label>
 
-                <label className='new-car-full'>
-                  Existing images
+                <div className='new-car-full'>
+                  <span className='form-label'>Existing images</span>
                   <div className='image-preview-row'>
                     {existingImages.map(imageUrl => (
                       <div
@@ -539,7 +596,7 @@ export default function Vehicles () {
                       </div>
                     ))}
                   </div>
-                </label>
+                </div>
 
                 <label className='new-car-full'>
                   Add images
@@ -604,6 +661,10 @@ export default function Vehicles () {
                 Warning: this will remove the vehicle from public listings. Are
                 you sure you want to delete{' '}
                 <strong>{deleteTarget?.title || 'this vehicle'}</strong>?
+              </p>
+              <p className='warning-text'>
+                All bids placed on this vehicle will also be removed from active
+                bid history.
               </p>
               <div className='new-car-actions'>
                 <button

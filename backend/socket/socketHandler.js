@@ -4,6 +4,18 @@ dotenv.config()
 
 export let io = null
 
+const getSocketUser = async token => {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  if (!token || !supabaseUrl) return null
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: {
+      apikey: process.env.SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`
+    }
+  })
+  return response.ok ? response.json() : null
+}
+
 export const registerSocketHandlers = server => {
   io = new Server(server, {
     cors: {
@@ -13,8 +25,22 @@ export const registerSocketHandlers = server => {
     }
   })
 
+  io.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth?.token
+      if (!token) return next()
+      const user = await getSocketUser(token)
+      if (!user?.id) return next(new Error('Unauthorized'))
+      socket.user = user
+      next()
+    } catch (error) {
+      next(new Error('Unauthorized'))
+    }
+  })
+
   io.on('connection', socket => {
     console.log('Socket connected:', socket.id)
+    if (socket.user?.id) socket.join(`user:${socket.user.id}`)
 
     socket.on('joinCar', carId => {
       socket.join(String(carId))
@@ -28,7 +54,7 @@ export const registerSocketHandlers = server => {
 
     socket.on('placeBid', payload => {
       console.log('Socket placeBid received:', payload)
-      io.to(String(payload.car_id)).emit('newBid', payload)
+      io.emit('newBid', payload)
       io.emit('bidAccepted', payload)
     })
 

@@ -12,7 +12,8 @@ import {
   getAuthUserProfile,
   listUsersForAdmin,
   toggleUserBidding,
-  toggleUserRole
+  toggleUserRole,
+  getBrands
 } from '../services/carService.js'
 import { io } from '../socket/socketHandler.js'
 
@@ -50,6 +51,14 @@ export const listCars = async (req, res) => {
     res.json(result)
   } catch (error) {
     res.status(500).json({ message: error.message || 'Failed to fetch cars' })
+  }
+}
+
+export const listBrands = async (_req, res) => {
+  try {
+    res.json(await getBrands())
+  } catch (error) {
+    res.status(500).json({ message: error.message || 'Failed to fetch brands' })
   }
 }
 

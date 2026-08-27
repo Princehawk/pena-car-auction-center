@@ -1,6 +1,7 @@
 import express from 'express'
 import {
   listCars,
+  listBrands,
   getCarDetails,
   createCarListing,
   editCarListing,
@@ -20,6 +21,7 @@ import { verifySupabaseToken, requireAdmin } from '../middleware/auth.js'
 const router = express.Router()
 
 router.get('/cars', listCars)
+router.get('/brands', listBrands)
 router.get('/cars/:id', getCarDetails)
 router.post('/admin/cars', verifySupabaseToken, requireAdmin, createCarListing)
 router.put(

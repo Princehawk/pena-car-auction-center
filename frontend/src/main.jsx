@@ -18,6 +18,8 @@ import NewCar from './admin/NewCar.jsx'
 import Bids from './admin/Bids.jsx'
 import Users from './admin/Users.jsx'
 import TermsAndConditions from './TermsAndConditions.jsx'
+import BidHistory from './BidHistory.jsx'
+import Notifications from './Notifications.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -32,6 +34,22 @@ createRoot(document.getElementById('root')).render(
             element={<TermsAndConditions />}
           />
           <Route path='/cars/:id' element={<CarDetails />} />
+          <Route
+            path='/my-bids'
+            element={
+              <ProtectedRoute redirectTo='/login'>
+                <BidHistory />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path='/notifications'
+            element={
+              <ProtectedRoute redirectTo='/login'>
+                <Notifications />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path='/admin/*'
             element={

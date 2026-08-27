@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
 import { supabase } from '../lib/supabase'
 import { io as socketClient } from 'socket.io-client'
+import { useAuth } from '../context/AuthContext.jsx'
 
 const API_URL = import.meta.env.VITE_API_URL || window.location.origin
 const SOCKET_URL =
@@ -9,12 +10,27 @@ const SOCKET_URL =
   import.meta.env.VITE_API_URL ||
   window.location.origin
 
-export default function Bids () {
+export default function Bids ({ setUnreadBidCount }) {
   const [bids, setBids] = useState([])
   const [selectedCarId, setSelectedCarId] = useState(null)
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [sortMode, setSortMode] = useState('newest')
-  const [socket, setSocket] = useState(null)
+  const { session } = useAuth()
+  const markBidRead = async bid => {
+    if (Number(bid.is_read)) return
+    const session = await supabase.auth.getSession()
+    if (!session.data.session) return
+    const response = await fetch(`${API_URL}/admin/bids/${bid.id}/read`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${session.data.session.access_token}`
+      }
+    })
+    if (!response.ok) return
+    setBids(current =>
+      current.map(item => (item.id === bid.id ? { ...item, is_read: 1 } : item))
+    )
+  }
 
   const loadBids = async () => {
     try {
@@ -35,8 +51,9 @@ export default function Bids () {
 
   useEffect(() => {
     loadBids()
-    const socket = socketClient(SOCKET_URL)
-    setSocket(socket)
+    const socket = socketClient(SOCKET_URL, {
+      auth: { token: session?.access_token }
+    })
 
     socket.on('connect', () => {
       console.log('✅ Bids socket connected:', socket.id, SOCKET_URL)
@@ -51,6 +68,18 @@ export default function Bids () {
       setBids(curr => [payload, ...curr])
       toast.info('New bid received')
     })
+    socket.on('bidRead', payload => {
+      setBids(curr =>
+        curr.map(bid => (bid.id === payload.id ? { ...bid, is_read: 1 } : bid))
+      )
+    })
+    socket.on('bidOutbid', payload => {
+      setBids(curr =>
+        curr.map(bid =>
+          bid.id === payload.id ? { ...bid, status: 'Outbid' } : bid
+        )
+      )
+    })
     socket.on('bidAccepted', () => {
       loadBids()
       toast.success('Bid status updated')
@@ -59,7 +88,7 @@ export default function Bids () {
     return () => {
       socket.disconnect()
     }
-  }, [])
+  }, [session?.access_token])
 
   const groupedBids = useMemo(() => {
     const groups = {}
@@ -104,6 +133,12 @@ export default function Bids () {
   const openHistory = carId => {
     setSelectedCarId(carId)
     setShowHistoryModal(true)
+    const group = groupedBids.find(item => item.carId === carId)
+    const unreadBids = group?.bids.filter(bid => !Number(bid.is_read)) || []
+    unreadBids.forEach(markBidRead)
+    if (unreadBids.length) {
+      setUnreadBidCount?.(count => Math.max(0, count - unreadBids.length))
+    }
   }
 
   return (
@@ -130,6 +165,11 @@ export default function Bids () {
                   group.carId}
               </strong>
               <span>
+                {group.bids.filter(bid => !Number(bid.is_read)).length > 0 && (
+                  <span className='unread-count'>
+                    {group.bids.filter(bid => !Number(bid.is_read)).length}
+                  </span>
+                )}{' '}
                 {group.bids[0]?.car_brand && group.bids[0]?.car_model
                   ? `${group.bids[0].car_brand} ${group.bids[0].car_model}`
                   : `${group.bids.length} bids`}

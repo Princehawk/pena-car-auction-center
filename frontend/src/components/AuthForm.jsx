@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -25,12 +25,18 @@ export default function AuthForm ({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [message, setMessage] = useState('')
   const [activeMode, setActiveMode] = useState(mode)
+  const messageTimer = useRef(null)
 
   const isLogin = activeMode === 'login'
+
+  useEffect(() => {
+    return () => clearTimeout(messageTimer.current)
+  }, [])
 
   const handleSubmit = async event => {
     event.preventDefault()
     setIsSubmitting(true)
+    clearTimeout(messageTimer.current)
     setMessage('')
 
     if (!isLogin && !acceptedTerms) {
@@ -43,17 +49,17 @@ export default function AuthForm ({
       if (isLogin) {
         await signInWithPassword(email, password)
         setMessage('Signed in successfully.')
+        onSuccess?.()
+        if (redirectTo) {
+          const targetPath = dbUser?.role === 'admin' ? '/admin' : '/'
+          navigate(targetPath, { replace: true })
+        }
       } else {
         await signUpWithPassword(email, password, fullName)
         setMessage(
-          'Account created. Please check your email for confirmation if required.'
+          'Account created successfully. A magic link has been sent to your email. Please check your inbox to continue.'
         )
-      }
-
-      onSuccess?.()
-      if (redirectTo) {
-        const targetPath = dbUser?.role === 'admin' ? '/admin' : '/'
-        navigate(targetPath, { replace: true })
+        messageTimer.current = setTimeout(() => setMessage(''), 5000)
       }
     } catch (error) {
       setMessage(error.message || 'Unable to complete authentication.')
@@ -165,7 +171,9 @@ export default function AuthForm ({
       </button>
 
       {(message || authError) && (
-        <p className='small status-text'>{message || authError}</p>
+        <p className={`small status-text ${message ? 'success-message' : ''}`}>
+          {message || authError}
+        </p>
       )}
     </div>
   )
